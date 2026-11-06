@@ -82,7 +82,7 @@ The first observation depends on the seed and the Gymnasium version, so your tup
 
 ### Gymnasium API (not legacy gym)
 
-This project uses the **Gymnasium** API (Gymnasium 0.26 and later). Legacy OpenAI `gym` (0.25 and earlier) is not compatible:
+This project uses the **Gymnasium** API (Gymnasium 0.26 and later). Legacy OpenAI `gym` (0.25 and earlier; OpenAI, n.d.-a) is not compatible:
 
 | Call | Gymnasium (used here) | Legacy `gym` |
 |---|---|---|
@@ -159,7 +159,7 @@ Sutton and Barto (2018, Example 5.1) use Blackjack as a standard teaching exampl
 | **Reward** (*r*) | A number the environment sends back after each step. It defines the goal: the agent tries to maximize the total reward it collects, not the reward from any single step. | +1 win, −1 loss, 0 draw (or 0 while the hand is still going) |
 | **Policy** (*π*) | The agent's behavior: a rule that maps states to actions. It can be deterministic, *a = μ(s)*, or stochastic, *a ~ π(·∣s)*. | "Hit on 16 or less unless the dealer shows 2–6," or the greedy policy from the learned Q-table |
 
-(OpenAI, n.d.; TpointTech, n.d.)
+(OpenAI, n.d.-b; TpointTech, n.d.)
 
 Shaier (2020), following Sutton and Barto (2018, §1.3), names four main sub-elements: **policy**, **reward signal**, **value function**, and an optional **model** of the environment. The first two are in the table. The other two are:
 
@@ -187,11 +187,11 @@ Shaier (2020), following Sutton and Barto (2018, §1.3), names four main sub-ele
 4. The agent uses the transition *(Sₜ, Aₜ, Rₜ₊₁, Sₜ₊₁)* to update its estimates. For Q-Learning this is one TD update of *Q(Sₜ, Aₜ)*.
 5. Steps 2–4 repeat until the episode reaches a terminal state. Then a new episode begins.
 
-The sequence *τ = (S₀, A₀, R₁, S₁, A₁, R₂, …)* is called a **trajectory** or **rollout**. Over a trajectory, the agent's objective is the **return**, which is the sum of rewards, possibly discounted (OpenAI, n.d.).
+The sequence *τ = (S₀, A₀, R₁, S₁, A₁, R₂, …)* is called a **trajectory** or **rollout**. Over a trajectory, the agent's objective is the **return**, which is the sum of rewards, possibly discounted (OpenAI, n.d.-b).
 
 ### Formal definition: Blackjack-v1 as a Markov Decision Process
 
-An MDP is a tuple **⟨S, A, P, R, γ⟩**, together with an initial-state distribution *ρ₀* (Dhakal, 2023; OpenAI, n.d.; Sutton & Barto, 2018, Ch. 3). What makes it an MDP is the **Markov property**: the next state and reward depend only on the current state and action, not on anything that happened earlier.
+An MDP is a tuple **⟨S, A, P, R, γ⟩**, together with an initial-state distribution *ρ₀* (Dhakal, 2023; OpenAI, n.d.-b; Sutton & Barto, 2018, Ch. 3). What makes it an MDP is the **Markov property**: the next state and reward depend only on the current state and action, not on anything that happened earlier.
 
 *P(Sₜ₊₁, Rₜ₊₁ ∣ Sₜ, Aₜ) = P(Sₜ₊₁, Rₜ₊₁ ∣ S₀, A₀, …, Sₜ, Aₜ)*
 
@@ -229,7 +229,7 @@ The `natural` flag (a 1.5× payout for a natural blackjack) is **ignored** when 
 #### Transitions and termination — *P*
 
 - **Initial state (*ρ₀*):** The player and the dealer each get two cards. One dealer card is face up, and that card is `dealer_card`.
-- **Card distribution:** Cards come from an **infinite deck**, sampled with replacement. Values 1 (ace) through 9 each have probability 1/13. A ten-valued card (10, J, Q, K) has probability 4/13. Since previous draws don't change the odds, the state tuple is enough to predict what happens next, so the Markov property holds.
+- **Card distribution:** Cards come from an **infinite deck**, sampled with replacement. Values 1 (ace) through 9 each have probability 1/13. A ten-valued card (10, J, Q, K) has probability 4/13. Since previous draws don't change the odds, the state tuple is enough to predict what happens next, so the Markov property holds. Each card is an independent random sample, so the next observation is a random variable whose distribution depends only on the current state and action (Wang, 2021).
 - **Hit (1):** The player draws one card. If the new total is over 21, the player **busts** and the episode **terminates** with reward −1. Otherwise the episode goes on with reward 0 and an updated state.
 - **Stick (0):** The episode **terminates**. The dealer reveals the hidden card and **draws until their total is ≥ 17** (the dealer also stands on a soft 17). The dealer's total is then compared with the player's to give +1, −1, or 0.
 - Blackjack-v1 has no time limit, so `truncated` is always `False`. Every episode ends by termination, usually after just a few steps.
@@ -242,7 +242,7 @@ The return from time *t* is
 
 *Gₜ = Rₜ₊₁ + γRₜ₊₂ + γ²Rₜ₊₃ + … = Σₖ γᵏ Rₜ₊ₖ₊₁*, with *0 ≤ γ ≤ 1*.
 
-The discount factor sets how much future rewards count compared with immediate ones (Sutton & Barto, 2018, §3.3; OpenAI, n.d.):
+The discount factor sets how much future rewards count compared with immediate ones (Sutton & Barto, 2018, §3.3; OpenAI, n.d.-b):
 
 - **γ close to 0** makes the agent short-sighted. It mostly cares about the next reward.
 - **γ close to 1** makes the agent far-sighted. Future rewards count almost as much as immediate ones.
@@ -450,7 +450,7 @@ This is the Q-Learning update from Sutton and Barto (2018, §6.5): *Q(S, A) ← 
 - **Stick:** `env.step()` returns **the same tuple** as *S* (see [above](#how-terminated-is-set-bust-vs-stick)). Bootstrapping would feed *maxₐ Q(S, a)*, the state's own value, back into its target. That bug is easy to miss and it biases learning. The `terminated` check prevents it.
 - Only `terminated` turns off bootstrapping, not `truncated`. A truncated step should still bootstrap from *S′*. Blackjack never truncates, but the agent handles that case correctly anyway.
 
-This is the standard structure in the Q-Learning tutorials referenced here (GeeksforGeeks, n.d.; DataCamp, n.d.): a table of state–action values, ε-greedy action selection, and a TD update toward *r + γ · max Q(s′, ·)*.
+This is the standard structure in the Q-Learning tutorials referenced here (GeeksforGeeks, 2026; Awan, 2022): a table of state–action values, ε-greedy action selection, and a TD update toward *r + γ · max Q(s′, ·)*.
 
 ### Hand-computed updates at state (15, 10, 0)
 
@@ -684,9 +684,11 @@ Mishra (2023) identifies **sample efficiency**, **the cost of exploration**, and
 - **Cost of exploration.** Exploration has a cost: the agent lost about 75,000 units of reward over training. Most of that was during the high-ε phase, when it was deliberately making bad moves to collect information. The linear decay schedule was chosen by hand. If ε decays too fast, rare states such as the usable-ace cells never get enough visits. If it decays too slowly, the agent wastes many episodes on random play. ε-greedy also explores without direction. It doesn't focus on the states it's least sure about.
 - **The gap between tabular and function-approximation methods.** Tabular Q-Learning comes with convergence guarantees: if every pair is visited infinitely often and α decays appropriately, it reaches *Q\**. The cost is that it only works on small, discrete problems. Function approximation, such as a neural network for *Q(s, a; θ)*, handles large and continuous spaces by generalizing across similar states. But it gives up those guarantees. Combining function approximation, bootstrapping and off-policy learning (which Sutton & Barto, 2018, §11.3, call the "deadly triad") can make learning unstable or diverge outright. Mishra (2023) describes moving from tabular to deep methods as what makes harder problems solvable, but also as a source of new instability and problems with tuning hyperparameters.
 
+RL is not limited to games. The same agent–environment loop already chooses which online ads people see (Dickson, 2021) and drives many other real-world applications (Mwiti, 2023; Santa Clara University, 2025).
+
 ### When Deep Q-Learning (DQN) is needed
 
-A DQN replaces the table lookup `q[obs]` with a neural network that takes the state as input and outputs one Q-value per action. According to Analytics Vidhya (n.d.), it's the right choice when the state space is **too large or continuous to list as a table**, for example raw pixels, sensor readings, or many interacting variables. In those cases, a function that generalizes across similar states is the only practical way to estimate *Q*.
+A DQN replaces the table lookup `q[obs]` with a neural network that takes the state as input and outputs one Q-value per action. According to Choudhary (2019), it's the right choice when the state space is **too large or continuous to list as a table**, for example raw pixels, sensor readings, or many interacting variables. In those cases, a function that generalizes across similar states is the only practical way to estimate *Q*.
 
 | Use a **tabular Q-table** when… | Use a **DQN** when… |
 |---|---|
@@ -695,7 +697,7 @@ A DQN replaces the table lookup `q[obs]` with a neural network that takes the st
 | You want exact, interpretable values and convergence guarantees | You need generalization more than guarantees |
 | *Example:* Blackjack-v1, FrozenLake, Taxi | *Example:* CartPole, LunarLander, Atari from pixels |
 
-DQN keeps the same update target as this project, *r + γ · maxₐ Q(s′, a)* with no bootstrapping when `terminated`, but adds two stabilizers (Analytics Vidhya, n.d.):
+DQN keeps the same update target as this project, *r + γ · maxₐ Q(s′, a)* with no bootstrapping when `terminated`, but adds two stabilizers (Choudhary, 2019):
 
 - An **experience replay buffer**, so training batches aren't made of consecutive, correlated transitions.
 - A **target network** that is updated only occasionally, so the bootstrap target doesn't shift on every gradient step.
@@ -725,30 +727,40 @@ Replace the tabular agent with a DQN and train it on **Gymnasium `CartPole-v1`**
 
 ## References
 
-Analytics Vidhya. (n.d.). *Introduction to deep Q-learning with Python*. Analytics Vidhya.
+Awan, A. A. (2022, October 27). *An introduction to Q-learning: A tutorial for beginners*. DataCamp. https://www.datacamp.com/tutorial/introduction-q-learning-beginner-tutorial
 
-DataCamp. (n.d.). *Introduction to Q-learning*. DataCamp.
+Choudhary, A. (2019, April 18). *Introduction to deep Q-learning*. Analytics Vidhya. https://www.analyticsvidhya.com/blog/2019/04/introduction-deep-q-learning-python/
 
-Dhakal. (2023). *MDP — RL* [Article].
+Dhakal, B. (2023, September 17). *MDP (Markov decision process) — RL (reinforcement learning)*. Medium. https://medium.com/@binaydhakal35/mdp-markov-decision-process-rl-reinforcement-learning-bc85e5d25031
+
+Dickson, B. (2021, February 22). *How reinforcement learning chooses the ads you see*. TechTalks. https://bdtechtalks.com/2021/02/22/reinforcement-learning-ad-optimization/
 
 Farama Foundation. (n.d.). *gymnasium/envs/toy_text/blackjack.py* (Version 1.4.0) [Source code]. GitHub. https://github.com/Farama-Foundation/Gymnasium/blob/main/gymnasium/envs/toy_text/blackjack.py
 
-GeeksforGeeks. (n.d.). *Q-learning in Python*. GeeksforGeeks.
+GeeksforGeeks. (2024, July 17). *Reinforcement learning*. https://www.geeksforgeeks.org/what-is-reinforcement-learning/
 
-GeeksforGeeks. (2024). *Reinforcement learning*. GeeksforGeeks.
+GeeksforGeeks. (2026, May 11). *Q-learning in reinforcement learning*. https://www.geeksforgeeks.org/q-learning-in-python/
 
-Huddar, M. (2022). *#1. Q learning algorithm solved example* [Video]. YouTube.
+Huddar, M. [Mahesh Huddar]. (2022, November 22). *#1. Q learning algorithm solved example | Reinforcement learning | Machine learning by Mahesh Huddar* [Video]. YouTube. https://www.youtube.com/watch?v=J3qX50yyiU0
 
-Mishra. (2023). *Application of RL in AI: Challenges, advances, and future*.
+Mishra, V. (2023, August 24). *Application of reinforcement learning in artificial intelligence: Challenges, advances, and future*. IFACET – IITK Foundation for Advanced Continuing Education & Training. https://ifacet.iitk.ac.in/knowledge-hub/artificial-intelligence/application-of-reinforcement-learning-in-artificial-intelligence-challenges-advances-and-future/
 
-OpenAI. (n.d.). *Part 1: Key concepts in RL*. Spinning Up in Deep RL. https://spinningup.openai.com/en/latest/spinningup/rl_intro.html
+Mwiti, D. (2023, September 1). *10 real-life applications of reinforcement learning*. neptune.ai. https://neptune.ai/blog/reinforcement-learning-applications
 
-Renze, M. (2020). *What is reinforcement learning?* Matthew Renze.
+OpenAI. (n.d.-a). *gym/gym/envs* [Source code]. GitHub. https://github.com/openai/gym/blob/master/gym/envs/
 
-Shaier. (2020). *The four main subelements of a reinforcement learning system* [Article].
+OpenAI. (n.d.-b). *Part 1: Key concepts in RL*. Spinning Up documentation. https://spinningup.openai.com/en/latest/spinningup/rl_intro.html
 
-Simplilearn. (2020). *Supervised vs unsupervised vs reinforcement learning*. Simplilearn.
+Renze, M. [Matthew Renze]. (2020, June 25). *What is reinforcement learning?* [Video]. YouTube. https://www.youtube.com/watch?v=RAUmWPpxa2M
 
-Sutton, R. S., & Barto, A. G. (2018). *Reinforcement learning: An introduction* (2nd ed.). MIT Press. http://incompleteideas.net/book/the-book-2nd.html
+Santa Clara University. (2025, June 27). *9 real-life reinforcement learning examples and use cases*. https://onlinedegrees.scu.edu/media/blog/9-examples-of-reinforcement-learning
 
-TpointTech. (n.d.). *Reinforcement learning tutorial*. TpointTech.
+Shaier, S. (2020, August 12). *The four main subelements of a reinforcement learning system*. Medium. https://medium.com/data-science/introduction-to-reinforcement-learning-rl-part-1-introduction-c0d55c1240a3
+
+Simplilearn. (2020, November 20). *Supervised vs unsupervised vs reinforcement learning | Machine learning tutorial | Simplilearn* [Video]. YouTube. https://www.youtube.com/watch?v=1FZ0A1QCMWc
+
+Sutton, R. S., & Barto, A. G. (2018). *Reinforcement learning: An introduction* (2nd ed.). MIT Press. https://www.andrew.cmu.edu/course/10-703/textbook/BartoSutton.pdf
+
+TpointTech. (n.d.). *Reinforcement learning tutorial*. https://www.tpointtech.com/reinforcement-learning
+
+Wang, S. [Shusen Wang]. (2021, May 5). *RL-1A: Random variables, observations, random sampling* [Video]. YouTube. https://www.youtube.com/watch?v=jNcMnwpPpfk
