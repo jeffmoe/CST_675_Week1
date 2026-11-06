@@ -1,6 +1,24 @@
 # CST_675_Week1
 Understanding and Implementing Basic RL Concepts: a tabular **Q-Learning** agent trained on Gymnasium **Blackjack-v1**, then checked against the known optimal policy.
 
+## Project Structure
+
+| Path | Contents |
+|---|---|
+| `agent.py` | `QLearningAgent`: a `(32, 11, 2, 2)` NumPy Q-table, ε-greedy with linear decay, the TD update with terminal handling, and save/load. Also `format_policy()` |
+| `train.py` | The training loop against `gym.make("Blackjack-v1", sab=True)`, `TrainingLog`, the learning-curve plots, and a CLI exposing α, γ, ε, and `n_episodes` |
+| `evaluate.py` | Greedy (ε = 0) evaluation, a comparison with the optimal policy and three baselines, and the policy table printout |
+| `plots/` | `a_cumulative_reward.png`, `b_steps_per_episode.png`, `c_win_rate.png` (from `train.py`) and `d_policy_comparison.png` (from `evaluate.py`) |
+| `q_table.npy` | The trained Q-table that `train.py` writes and `evaluate.py` reads |
+
+### Quick start
+
+```bash
+pip install -r requirements.txt
+python train.py       # ~30 s: trains 500k episodes, writes q_table.npy and plots/a–c
+python evaluate.py    # ~50 s: 200k greedy hands per policy, writes plots/d
+```
+
 ## Setup
 
 ### Requirements
@@ -379,13 +397,13 @@ I set the player's and dealer's hands directly on `env.unwrapped` and replaced `
 | 7 | `[5, 6, 10]` (21) | `[1, 10]` natural | stick | `((21, 1, 0), 0.0, True, False)`: draw |
 | 8 | `[10, 10]` | `[6, 10]` | stick → dealer draws 10 (26) | `((20, 6, 0), 1.0, True, False)`: dealer bust, score 0 |
 
-## Tabular Q-Learning Agent (`q_learning.py`)
+## Tabular Q-Learning Agent (`agent.py`)
 
 ### Usage
 
 ```bash
-python q_learning.py                                  # defaults below
-python q_learning.py --n-episodes 1000000 --alpha 0.005 --gamma 1.0 \
+python train.py                                       # defaults below
+python train.py --n-episodes 1000000 --alpha 0.005 --gamma 1.0 \
     --epsilon-start 1.0 --epsilon-final 0.05 --epsilon-decay-fraction 0.5 \
     --seed 0 --save q_table.npy
 ```
@@ -474,32 +492,31 @@ All three results match what `QLearningAgent.update()` returns: δ = 0.2, −0.5
 
 ### First training run
 
-`python q_learning.py` (500,000 episodes, defaults, seed 0, about 29 s):
+`python train.py` (500,000 episodes, defaults, seed 0, about 29 s):
 
 ```
-episodes: 500,000  final epsilon: 0.050
-mean reward, first 10,000: -0.3929
-mean reward, last  10,000: -0.0587
+first 10,000: mean reward -0.3929  ...
+last  10,000: mean reward -0.0587  ...
 Q[(15, 10, 0)] = stick -0.5914, hit -0.4684
 ```
 
 - The average reward per hand improves from −0.39 while the agent is mostly exploring to −0.06 once ε = 0.05. Even an optimal player loses money at this game, so the agent can't do better than a small negative average.
 - At *(15, 10, 0)* the agent prefers **hit** (−0.47 vs. −0.59 for stick). That matches Sutton and Barto's (2018, Fig. 5.2) optimal policy, which hits a hard 15 against a dealer 10.
 
-These numbers come from training with exploration still on. A proper evaluation of the greedy policy, including a comparison with Fig. 5.2, comes next.
+These numbers come from training with exploration still on. See [Greedy Evaluation and Baselines](#greedy-evaluation-and-baselines-evaluatepy) for the ε = 0 results.
 
 ## Training Loop, Logging, and Plots
 
 ### Usage
 
 ```bash
-python q_learning.py --plot-dir figures            # train + print stats + save plots
-python q_learning.py --plot-dir figures --window 5000
+python train.py                     # train + print stats + save q_table.npy and plots/a–c
+python train.py --window 5000 --plot-dir plots
 ```
 
-Plotting is in `plot_training.py` (`plot_training(log, out_dir, window)`). It is only imported when you pass `--plot-dir`.
+The plotting code is `plot_training(log, out_dir, window)` in `train.py`.
 
-### The loop (in `train()` in `q_learning.py`)
+### The loop (in `train()` in `train.py`)
 
 ```python
 obs, info = env.reset(seed=seed if episode == 0 else None)
@@ -553,19 +570,19 @@ last  10,000: mean reward -0.0587  win 0.428  loss 0.487  draw 0.085  mean steps
 
 #### (a) Cumulative reward vs. episode
 
-![Cumulative reward](figures/a_cumulative_reward.png)
+![Cumulative reward](plots/a_cumulative_reward.png)
 
 The curve goes **down the whole time**, and that's expected. Blackjack has a house edge, so even the optimal policy has a negative expected return per hand. What shows learning is the **slope**, which equals the average reward per hand. It flattens from about −0.39 per hand while exploring (ε ≈ 1) to about −0.06 once ε reaches 0.05 around episode 250,000. After that point the curve is nearly straight, which means the policy has stopped changing much. You should **not** expect this curve to turn upward for Blackjack.
 
 #### (b) Steps per episode
 
-![Steps per episode](figures/b_steps_per_episode.png)
+![Steps per episode](plots/b_steps_per_episode.png)
 
 Most hands last 1–2 steps, and a hand can't last more than a few hits before reaching 21 or busting. The average **rises** from 1.38 to about 1.56. A random agent sticks 50% of the time on its first move, even on a total of 5, so its hands end early. The trained agent always hits sums of 11 or less and keeps hitting stiff hands (12–16) against strong dealer cards, so its hands take more steps. Longer hands here mean better play, because the agent has learned to take cards that can't bust it.
 
 #### (c) Win / loss / draw moving average
 
-![Win rate](figures/c_win_rate.png)
+![Win rate](plots/c_win_rate.png)
 
 - Over a 10,000-episode moving window, the win rate climbs from **28% to about 43%** and the loss rate falls from **68% to about 49%**.
 - The draw rate roughly doubles, from 4% to about 8.5%, because the agent reaches competitive totals of 17–21 more often and ties the dealer.
@@ -607,7 +624,36 @@ No usable ace                          Usable ace
 - **Overall:** 191 of the 200 decision states (95.5%) match. All the major features are there: the stick-on-17+ boundary, the split between strong and weak dealer cards for stiff hands, and the more aggressive play with a usable ace.
 - **No-ace mismatches:** all 5 are in "close call" cells where hitting and sticking have nearly the same expected value: 17 vs. A, 14 vs. 2, 13 vs. 4, and 12 vs. 4 and 6. In those cells, Monte-Carlo noise from ±1 outcomes is larger than the true difference between the two actions.
 - **Usable-ace mismatches:** all 4 are in states that come up rarely. Those cells get far fewer updates, so their estimates are noisier.
-- **Possible fixes:** more episodes, a smaller α late in training, or averaging over several seeds would all reduce these errors. The training numbers above still include ε = 0.05 exploration. A separate greedy evaluation with ε = 0 will measure the policy's true performance.
+- **Possible fixes:** more episodes, a smaller α late in training, or averaging over several seeds would all reduce these errors. The greedy evaluation below shows that these 9 cells barely affect the actual win rate.
+
+## Greedy Evaluation and Baselines (`evaluate.py`)
+
+```bash
+python evaluate.py                                  # loads q_table.npy, 200,000 hands per policy
+python evaluate.py --q-table q_table.npy --n-episodes 200000 --seed 12345
+```
+
+`evaluate.py` loads the trained Q-table and plays each policy below with **ε = 0** and **no learning**. Each policy plays the same number of hands, using an evaluation seed (12345) that differs from the training seed (0).
+
+| Policy | Mean reward per hand (± 95% CI) | Win | Loss | Draw | Steps |
+|---|---|---|---|---|---|
+| **Q-Learning (greedy)** | **−0.0420 ± 0.0042** | 43.3% | 47.5% | 9.2% | 1.58 |
+| Sutton & Barto optimal (Fig. 5.2) | −0.0416 ± 0.0042 | 43.4% | 47.6% | 9.0% | 1.55 |
+| Dealer rule (hit < 17) | −0.0755 ± 0.0041 | 41.1% | 48.7% | 10.2% | 1.63 |
+| Always stick | −0.1803 ± 0.0042 | 38.6% | 56.6% | 4.9% | 1.00 |
+| Random | −0.3960 ± 0.0039 | 28.2% | 67.8% | 4.1% | 1.38 |
+
+- **The learned policy is competent.** Its expected loss is **−0.042 per hand**, which is **statistically the same as the optimal policy's** −0.042 (the confidence intervals overlap almost completely). It beats every simple baseline by a clear margin.
+- **Improvement over baselines:**
+  - Compared with the random policy, it loses about 9× less per hand.
+  - Compared with always sticking, it loses about 4× less.
+  - Compared with copying the dealer's rule, it loses about 45% less. That gap comes from sticking on stiff hands when the dealer shows a weak card.
+- **The 9 mismatched cells cost almost nothing.** Those are close-call or rarely visited states, and the difference in total reward is too small to detect at this sample size.
+- **Learning curve vs. evaluation:** The −0.059 on the learning curve vs. −0.042 here is the cost of the remaining ε = 0.05 exploration during training.
+
+`evaluate.py` also prints the policy grids with mismatches in brackets and saves a side-by-side heatmap:
+
+![Policy comparison](plots/d_policy_comparison.png)
 
 ## Reflection
 
@@ -671,7 +717,7 @@ Replace the tabular agent with a DQN and train it on **Gymnasium `CartPole-v1`**
 **Plan:**
 
 1. **Add PyTorch** to `requirements.txt` (`torch`). No other new dependencies are needed.
-2. **Keep the interface the same.** `DQNAgent` should keep the `act(obs)`, `update(obs, action, reward, next_obs, terminated)` and `decay_epsilon()` methods, so the existing `train()` loop, `TrainingLog` and `plot_training.py` work with few changes.
+2. **Keep the interface the same.** `DQNAgent` should keep the `act(obs)`, `update(obs, action, reward, next_obs, terminated)` and `decay_epsilon()` methods, so the existing `train()` loop, `TrainingLog` and `plot_training()` in `train.py` work with few changes.
 3. **Add a replay buffer** (about 50k transitions storing *(s, a, r, s′, terminated)*). Sample minibatches of 64 and start learning after 1,000 warm-up steps.
 4. **Add a target network**, synced with the online network every ~500 steps (or with a soft update, τ = 0.005). Use a Huber loss on *r + γ · (1 − terminated) · maxₐ Q_target(s′, a)* with γ = 0.99. The `terminated`/`truncated` distinction becomes essential here, because CartPole actually truncates at 500 steps. A pole still balanced at step 500 must not be treated as a dead end.
 5. **Define success** as Gymnasium's threshold for CartPole-v1, an average return of at least 475 over 100 consecutive episodes, measured with a greedy (ε = 0) evaluation.
