@@ -609,7 +609,77 @@ No usable ace                          Usable ace
 - **Usable-ace mismatches:** all 4 are in states that come up rarely. Those cells get far fewer updates, so their estimates are noisier.
 - **Possible fixes:** more episodes, a smaller α late in training, or averaging over several seeds would all reduce these errors. The training numbers above still include ε = 0.05 exploration. A separate greedy evaluation with ε = 0 will measure the policy's true performance.
 
+## Reflection
+
+### Why Blackjack suits tabular Q-Learning
+
+Tabular Q-Learning stores one value for every state–action pair and learns each one separately from the experiences where it actually comes up. That only works when two conditions hold, and Blackjack-v1 meets both.
+
+1. **The state space is small and discrete.** There are only about 200 meaningful decision states (360 reachable ones), with 2 actions each. The whole Q-table is an 11 KB array. In 500,000 training hands, each decision state was visited about 2,500 times on average, so even with noisy ±1 outcomes the estimates settled down. That's why the learned policy matched 95.5% of Sutton and Barto's optimal policy in under 30 seconds.
+2. **The state is fully observable, so the problem is Markov.** Because cards are drawn from an infinite deck, `(player_sum, dealer_card, usable_ace)` contains everything that affects what happens next. Q-Learning's update assumes *maxₐ Q(S′, a)* is a valid estimate of everything that follows *S′*, and that's only true when *S′* fully describes the situation (Sutton & Barto, 2018, §3.1).
+
+**What would break if the state space were large or continuous:**
+
+- **Memory:** The table grows with every state variable you add. Add a running card count, a shoe of several decks, or a bet size, and it grows multiplicatively. With continuous states like CartPole's positions and velocities, you can't build a table at all unless you discretize.
+- **No generalization:** Each cell is learned on its own, so what the agent learns in one state tells it nothing about a nearly identical state. In a big state space, most cells would be visited rarely or never. We already see this on a small scale: the 4 mismatches in the usable-ace grid are in states that came up rarely.
+- **Discretizing has its own costs:** Coarse bins merge states that call for different actions. Fine bins bring back the problem of too many cells and too few visits per cell.
+
+**What would break if the state were partially observable:**
+
+- **A finite deck:** With a real 6-deck shoe, the cards already dealt change the odds for the next card. The observation tuple would leave out that information, so two hands that look identical could actually need different actions. The problem would become a partially observable MDP (POMDP).
+- **Aliasing:** A Q-table indexed by the observation would average over those hidden situations. The update would then bootstrap from a value that isn't actually Markov, so Q-Learning's convergence guarantees would no longer hold.
+- **Fixes:** You'd need to add the missing information to the state, such as a card count, keep a belief over the hidden state, or use a recurrent model.
+
+### Challenges
+
+Mishra (2023) identifies **sample efficiency**, **the cost of exploration**, and **scaling to high-dimensional problems** as key open challenges for RL. Each one appeared in this project:
+
+- **Sample efficiency.** It took 500,000 episodes to learn a 200-state, 2-action policy. Each update moves *Q* only α = 1% of the way toward a noisy ±1 target, so the close-call cells (17 vs. A, 12 vs. 4) still had the wrong answer when training ended. That's fine in a simulator that runs 17,000 hands a second. It would be prohibitive for anything where samples are slow or expensive, like a robot, a medical trial, or real money. Nothing learned in one cell carries over to its neighbors, so every cell has to be learned from scratch.
+- **Cost of exploration.** Exploration has a cost: the agent lost about 75,000 units of reward over training. Most of that was during the high-ε phase, when it was deliberately making bad moves to collect information. The linear decay schedule was chosen by hand. If ε decays too fast, rare states such as the usable-ace cells never get enough visits. If it decays too slowly, the agent wastes many episodes on random play. ε-greedy also explores without direction. It doesn't focus on the states it's least sure about.
+- **The gap between tabular and function-approximation methods.** Tabular Q-Learning comes with convergence guarantees: if every pair is visited infinitely often and α decays appropriately, it reaches *Q\**. The cost is that it only works on small, discrete problems. Function approximation, such as a neural network for *Q(s, a; θ)*, handles large and continuous spaces by generalizing across similar states. But it gives up those guarantees. Combining function approximation, bootstrapping and off-policy learning (which Sutton & Barto, 2018, §11.3, call the "deadly triad") can make learning unstable or diverge outright. Mishra (2023) describes moving from tabular to deep methods as what makes harder problems solvable, but also as a source of new instability and problems with tuning hyperparameters.
+
+### When Deep Q-Learning (DQN) is needed
+
+A DQN replaces the table lookup `q[obs]` with a neural network that takes the state as input and outputs one Q-value per action. According to Analytics Vidhya (n.d.), it's the right choice when the state space is **too large or continuous to list as a table**, for example raw pixels, sensor readings, or many interacting variables. In those cases, a function that generalizes across similar states is the only practical way to estimate *Q*.
+
+| Use a **tabular Q-table** when… | Use a **DQN** when… |
+|---|---|
+| States are discrete and few (hundreds to maybe millions) | States are continuous or high-dimensional |
+| You can visit every (s, a) many times | Most states will never be seen exactly twice |
+| You want exact, interpretable values and convergence guarantees | You need generalization more than guarantees |
+| *Example:* Blackjack-v1, FrozenLake, Taxi | *Example:* CartPole, LunarLander, Atari from pixels |
+
+DQN keeps the same update target as this project, *r + γ · maxₐ Q(s′, a)* with no bootstrapping when `terminated`, but adds two stabilizers (Analytics Vidhya, n.d.):
+
+- An **experience replay buffer**, so training batches aren't made of consecutive, correlated transitions.
+- A **target network** that is updated only occasionally, so the bootstrap target doesn't shift on every gradient step.
+
+The action space still has to be discrete. DQN takes a max over actions, so continuous actions need a different method, such as an actor-critic.
+
+### Proposed next step: DQN on CartPole-v1
+
+Replace the tabular agent with a DQN and train it on **Gymnasium `CartPole-v1`**:
+
+| | Blackjack-v1 (now) | CartPole-v1 (next) |
+|---|---|---|
+| Observation | 3 discrete ints, about 200 meaningful states | `Box(4,)` continuous: cart position, cart velocity, pole angle, pole angular velocity |
+| Actions | `Discrete(2)`: stick / hit | `Discrete(2)`: push left / push right |
+| Reward | ±1 / 0 at the end of the hand | +1 for every step the pole stays up |
+| Episode end | Always `terminated` | `terminated` when the pole falls or the cart leaves the track. **`truncated` at 500 steps** |
+| Q representation | `(32, 11, 2, 2)` array | MLP `4 → 128 → 128 → 2` |
+
+**Plan:**
+
+1. **Add PyTorch** to `requirements.txt` (`torch`). No other new dependencies are needed.
+2. **Keep the interface the same.** `DQNAgent` should keep the `act(obs)`, `update(obs, action, reward, next_obs, terminated)` and `decay_epsilon()` methods, so the existing `train()` loop, `TrainingLog` and `plot_training.py` work with few changes.
+3. **Add a replay buffer** (about 50k transitions storing *(s, a, r, s′, terminated)*). Sample minibatches of 64 and start learning after 1,000 warm-up steps.
+4. **Add a target network**, synced with the online network every ~500 steps (or with a soft update, τ = 0.005). Use a Huber loss on *r + γ · (1 − terminated) · maxₐ Q_target(s′, a)* with γ = 0.99. The `terminated`/`truncated` distinction becomes essential here, because CartPole actually truncates at 500 steps. A pole still balanced at step 500 must not be treated as a dead end.
+5. **Define success** as Gymnasium's threshold for CartPole-v1, an average return of at least 475 over 100 consecutive episodes, measured with a greedy (ε = 0) evaluation.
+6. **Compare against a tabular baseline.** Bin CartPole's 4 continuous variables (for example 10 bins each, giving 10⁴ states) and train this repo's tabular agent on the result. Plot the return curves of both methods against the number of environment steps. That puts numbers on the sample-efficiency and generalization trade-off described above.
+
 ## References
+
+Analytics Vidhya. (n.d.). *Introduction to deep Q-learning with Python*. Analytics Vidhya.
 
 DataCamp. (n.d.). *Introduction to Q-learning*. DataCamp.
 
@@ -622,6 +692,8 @@ GeeksforGeeks. (n.d.). *Q-learning in Python*. GeeksforGeeks.
 GeeksforGeeks. (2024). *Reinforcement learning*. GeeksforGeeks.
 
 Huddar, M. (2022). *#1. Q learning algorithm solved example* [Video]. YouTube.
+
+Mishra. (2023). *Application of RL in AI: Challenges, advances, and future*.
 
 OpenAI. (n.d.). *Part 1: Key concepts in RL*. Spinning Up in Deep RL. https://spinningup.openai.com/en/latest/spinningup/rl_intro.html
 
