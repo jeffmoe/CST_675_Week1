@@ -595,7 +595,7 @@ The run prints the greedy policy (*argmaxₐ Q*) in the same layout as Sutton an
 
 ```
 No usable ace                          Usable ace
-      A  2  3  4  5  6  7  8  9 10           A  2  3  4  5  6  7  8  9 10
+      A  2  3  4  5  6  7  8  9 10          A  2  3  4  5  6  7  8  9 10
   21  S  S  S  S  S  S  S  S  S  S      21  S  S  S  S  S  S  S  S  S  S
   20  S  S  S  S  S  S  S  S  S  S      20  S  S  S  S  S  S  S  S  S  S
   19  S  S  S  S  S  S  S  S  S  S      19 [H] S  S  S  S  S  S  S  S  S
