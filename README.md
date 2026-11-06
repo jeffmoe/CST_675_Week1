@@ -488,6 +488,127 @@ Q[(15, 10, 0)] = stick -0.5914, hit -0.4684
 
 These numbers come from training with exploration still on. A proper evaluation of the greedy policy, including a comparison with Fig. 5.2, comes next.
 
+## Training Loop, Logging, and Plots
+
+### Usage
+
+```bash
+python q_learning.py --plot-dir figures            # train + print stats + save plots
+python q_learning.py --plot-dir figures --window 5000
+```
+
+Plotting is in `plot_training.py` (`plot_training(log, out_dir, window)`). It is only imported when you pass `--plot-dir`.
+
+### The loop (in `train()` in `q_learning.py`)
+
+```python
+obs, info = env.reset(seed=seed if episode == 0 else None)
+total_reward, steps = 0.0, 0
+while True:
+    action = agent.act(obs)
+    next_obs, reward, terminated, truncated, info = env.step(action)   # Gymnasium 5-tuple
+    agent.update(obs, action, reward, next_obs, terminated)            # NOT (terminated or truncated)
+    obs = next_obs
+    total_reward += reward
+    steps += 1
+    if terminated or truncated:
+        break
+log.record(total_reward, steps, agent.epsilon, terminated)
+agent.decay_epsilon()
+```
+
+Only the first `reset()` gets the seed. Every later reset continues the same RNG stream, so a whole run can be repeated exactly: re-running with `--seed 0` produces identical numbers.
+
+### `terminated` vs. `truncated`: which one goes into the update
+
+| | `terminated` | `truncated` |
+|---|---|---|
+| **Meaning** | The MDP reached a real terminal state | The episode was stopped from outside the MDP (time limit, step cap) |
+| **Value of *S′*** | 0 by definition (Sutton & Barto, 2018, §3.4) | Unknown. *S′* is a normal state that has a future |
+| **Q-Learning target** | *R* | *R + γ · maxₐ Q(S′, a)* |
+| **Ends the loop?** | Yes | Yes |
+| **In Blackjack-v1** | Every episode (stick or bust) | Never (`max_episode_steps=None`) |
+
+The two flags play different roles. `terminated or truncated` decides **when to stop the loop**. `terminated` alone decides **whether to bootstrap**. If you passed `done = terminated or truncated` into the update, a time-limited episode would be treated as if its final state were worth 0. That bias goes unnoticed in Blackjack because truncation never happens. But it's a real bug in environments that do truncate, such as CartPole's 500-step cap. In this run the log confirms `terminated: 500,000  truncated: 0`.
+
+### What gets logged
+
+`TrainingLog` records these values for each episode:
+
+- `episode_rewards`: the return *G* of the episode, always −1, 0, or +1
+- `episode_lengths`: the number of `step()` calls
+- `epsilons`: the ε used during that episode
+- `outcomes`: +1 for a win, 0 for a draw, −1 for a loss
+
+It also keeps running totals of `wins`, `losses`, and `draws`, plus `terminated_episodes` and `truncated_episodes`. `td_errors` is recorded once per step rather than once per episode.
+
+### Results (500,000 episodes, defaults, seed 0, about 29 s)
+
+```
+terminated: 500,000  truncated: 0
+overall  W/L/D: 193,709 / 268,920 / 37,371  (win 0.387, loss 0.538, draw 0.075)
+first 10,000: mean reward -0.3929  win 0.284  loss 0.677  draw 0.039  mean steps 1.379
+last  10,000: mean reward -0.0587  win 0.428  loss 0.487  draw 0.085  mean steps 1.557
+```
+
+#### (a) Cumulative reward vs. episode
+
+![Cumulative reward](figures/a_cumulative_reward.png)
+
+The curve goes **down the whole time**, and that's expected. Blackjack has a house edge, so even the optimal policy has a negative expected return per hand. What shows learning is the **slope**, which equals the average reward per hand. It flattens from about −0.39 per hand while exploring (ε ≈ 1) to about −0.06 once ε reaches 0.05 around episode 250,000. After that point the curve is nearly straight, which means the policy has stopped changing much. You should **not** expect this curve to turn upward for Blackjack.
+
+#### (b) Steps per episode
+
+![Steps per episode](figures/b_steps_per_episode.png)
+
+Most hands last 1–2 steps, and a hand can't last more than a few hits before reaching 21 or busting. The average **rises** from 1.38 to about 1.56. A random agent sticks 50% of the time on its first move, even on a total of 5, so its hands end early. The trained agent always hits sums of 11 or less and keeps hitting stiff hands (12–16) against strong dealer cards, so its hands take more steps. Longer hands here mean better play, because the agent has learned to take cards that can't bust it.
+
+#### (c) Win / loss / draw moving average
+
+![Win rate](figures/c_win_rate.png)
+
+- Over a 10,000-episode moving window, the win rate climbs from **28% to about 43%** and the loss rate falls from **68% to about 49%**.
+- The draw rate roughly doubles, from 4% to about 8.5%, because the agent reaches competitive totals of 17–21 more often and ties the dealer.
+- All three curves level off once ε stops decaying, which is a sign the learned values have converged.
+- A loss rate above the win rate is normal for this game. Under these rules, even perfect play loses slightly more hands than it wins.
+
+### Interpreting the learned policy
+
+The run prints the greedy policy (*argmaxₐ Q*) in the same layout as Sutton and Barto (2018, Fig. 5.2). Rows are the player's sum, columns are the dealer's face-up card, H = hit and S = stick:
+
+```
+No usable ace                          Usable ace
+      A  2  3  4  5  6  7  8  9 10           A  2  3  4  5  6  7  8  9 10
+  21  S  S  S  S  S  S  S  S  S  S      21  S  S  S  S  S  S  S  S  S  S
+  20  S  S  S  S  S  S  S  S  S  S      20  S  S  S  S  S  S  S  S  S  S
+  19  S  S  S  S  S  S  S  S  S  S      19 [H] S  S  S  S  S  S  S  S  S
+  18  S  S  S  S  S  S  S  S  S  S      18  H [H][H] S [H] S  S  S  H  H
+  17 [H] S  S  S  S  S  S  S  S  S      17  H  H  H  H  H  H  H  H  H  H
+  16  H  S  S  S  S  S  H  H  H  H      16  H  H  H  H  H  H  H  H  H  H
+  15  H  S  S  S  S  S  H  H  H  H      15  H  H  H  H  H  H  H  H  H  H
+  14  H [H] S  S  S  S  H  H  H  H      14  H  H  H  H  H  H  H  H  H  H
+  13  H  S  S [H] S  S  H  H  H  H      13  H  H  H  H  H  H  H  H  H  H
+  12  H  H  H [H] S [H] H  H  H  H      12  H  H  H  H  H  H  H  H  H  H
+```
+
+`[ ]` marks cells that differ from Sutton and Barto's optimal policy.
+
+**What a well-learned Blackjack policy looks like** (Sutton & Barto, 2018, Fig. 5.2):
+
+- **Always hit on 11 or less.** No single card can bust you. These rows aren't shown because the decision is trivial.
+- **Always stick on hard 17 or more.** The chance of busting on a hit is too high.
+- **Hard 12–16 (the "stiff" hands) depend on the dealer's card:**
+  - Against a **weak** dealer card (2–6), **stick** on 13–16 and on 12 against 4–6. The dealer has to draw to 17 and often busts, so there's no reason to risk busting yourself.
+  - Against a **strong** dealer card (7–10 or A), **hit**. The dealer will probably finish on 17–21, so standing on a stiff hand usually loses.
+- **With a usable ace, play more aggressively.** You can't bust on the next card, because the ace just goes back to counting as 1. So hit on soft 17 and below, stick on soft 19 and above, and at soft 18 stick against 2–8 but hit against 9, 10, or A.
+
+**How the learned policy compares:**
+
+- **Overall:** 191 of the 200 decision states (95.5%) match. All the major features are there: the stick-on-17+ boundary, the split between strong and weak dealer cards for stiff hands, and the more aggressive play with a usable ace.
+- **No-ace mismatches:** all 5 are in "close call" cells where hitting and sticking have nearly the same expected value: 17 vs. A, 14 vs. 2, 13 vs. 4, and 12 vs. 4 and 6. In those cells, Monte-Carlo noise from ±1 outcomes is larger than the true difference between the two actions.
+- **Usable-ace mismatches:** all 4 are in states that come up rarely. Those cells get far fewer updates, so their estimates are noisier.
+- **Possible fixes:** more episodes, a smaller α late in training, or averaging over several seeds would all reduce these errors. The training numbers above still include ε = 0.05 exploration. A separate greedy evaluation with ε = 0 will measure the policy's true performance.
+
 ## References
 
 DataCamp. (n.d.). *Introduction to Q-learning*. DataCamp.

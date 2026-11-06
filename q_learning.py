@@ -99,12 +99,52 @@ class QLearningAgent:
         return np.argmax(self.q, axis=-1)
 
 
+def format_policy(policy: np.ndarray, usable_ace: int) -> str:
+    """Text grid of the greedy policy: rows = player sum 21..12, cols = dealer A..10.
+
+    H = hit, S = stick (the layout of Sutton & Barto, 2018, Fig. 5.2).
+    """
+    header = "      " + " ".join(f"{'A' if d == 1 else d:>2}" for d in range(1, 11))
+    rows = [header]
+    for player_sum in range(21, 11, -1):
+        cells = " ".join(
+            f"{'H' if policy[player_sum, d, usable_ace] == HIT else 'S':>2}" for d in range(1, 11)
+        )
+        rows.append(f"  {player_sum:>2}  {cells}")
+    return "\n".join(rows)
+
+
 @dataclass
 class TrainingLog:
-    episode_rewards: list[float] = field(default_factory=list)
-    episode_lengths: list[int] = field(default_factory=list)
-    td_errors: list[float] = field(default_factory=list)
-    epsilons: list[float] = field(default_factory=list)
+    """Per-episode training statistics (one entry per episode unless noted)."""
+
+    episode_rewards: list[float] = field(default_factory=list)  # return G of the episode
+    episode_lengths: list[int] = field(default_factory=list)  # number of env.step() calls
+    epsilons: list[float] = field(default_factory=list)  # ε used during the episode
+    outcomes: list[int] = field(default_factory=list)  # +1 win, 0 draw, -1 loss
+    td_errors: list[float] = field(default_factory=list)  # one entry per step
+    wins: int = 0
+    losses: int = 0
+    draws: int = 0
+    terminated_episodes: int = 0  # ended in a true terminal state (stick or bust)
+    truncated_episodes: int = 0  # cut off by a time limit (never happens in Blackjack-v1)
+
+    def record(self, total_reward: float, steps: int, epsilon: float, terminated: bool) -> None:
+        outcome = int(np.sign(total_reward))
+        self.episode_rewards.append(total_reward)
+        self.episode_lengths.append(steps)
+        self.epsilons.append(epsilon)
+        self.outcomes.append(outcome)
+        if outcome > 0:
+            self.wins += 1
+        elif outcome < 0:
+            self.losses += 1
+        else:
+            self.draws += 1
+        if terminated:
+            self.terminated_episodes += 1
+        else:
+            self.truncated_episodes += 1
 
 
 def train(
@@ -129,21 +169,23 @@ def train(
     log = TrainingLog()
 
     for episode in range(n_episodes):
-        obs, _ = env.reset(seed=seed if episode == 0 else None)
-        done, total_reward, length = False, 0.0, 0
+        # Seed only the first reset; later resets continue the same RNG stream.
+        obs, info = env.reset(seed=seed if episode == 0 else None)
+        total_reward, steps = 0.0, 0
 
-        while not done:
+        while True:
             action = agent.act(obs)
-            next_obs, reward, terminated, truncated, _ = env.step(action)
+            next_obs, reward, terminated, truncated, info = env.step(action)
+            # Pass `terminated`, not `terminated or truncated`: only a true terminal
+            # state has value 0. A truncated step still bootstraps from next_obs.
             log.td_errors.append(agent.update(obs, action, reward, next_obs, terminated))
             obs = next_obs
             total_reward += reward
-            length += 1
-            done = terminated or truncated
+            steps += 1
+            if terminated or truncated:
+                break
 
-        log.episode_rewards.append(total_reward)
-        log.episode_lengths.append(length)
-        log.epsilons.append(agent.epsilon)
+        log.record(total_reward, steps, agent.epsilon, terminated)
         agent.decay_epsilon()
 
     env.close()
@@ -160,6 +202,8 @@ def main() -> None:
     parser.add_argument("--epsilon-decay-fraction", type=float, default=0.5)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--save", type=str, default=None, help="path to save the Q-table (.npy)")
+    parser.add_argument("--plot-dir", type=str, default=None, help="directory for training plots")
+    parser.add_argument("--window", type=int, default=10_000, help="moving-average window")
     args = parser.parse_args()
 
     agent, log = train(
@@ -172,16 +216,43 @@ def main() -> None:
         seed=args.seed,
     )
 
+    n = len(log.episode_rewards)
     rewards = np.asarray(log.episode_rewards)
-    window = min(10_000, len(rewards))
-    print(f"episodes: {len(rewards):,}  final epsilon: {agent.epsilon:.3f}")
-    print(f"mean reward, first {window:,}: {rewards[:window].mean():+.4f}")
-    print(f"mean reward, last  {window:,}: {rewards[-window:].mean():+.4f}")
+    outcomes = np.asarray(log.outcomes)
+    lengths = np.asarray(log.episode_lengths)
+    window = min(args.window, n)
+    print(f"episodes: {n:,}  final epsilon: {agent.epsilon:.3f}")
+    print(
+        f"terminated: {log.terminated_episodes:,}  truncated: {log.truncated_episodes:,}"
+    )
+    print(
+        f"overall  W/L/D: {log.wins:,} / {log.losses:,} / {log.draws:,}  "
+        f"(win {log.wins / n:.3f}, loss {log.losses / n:.3f}, draw {log.draws / n:.3f})"
+    )
+    for label, sl in (("first", slice(None, window)), ("last ", slice(-window, None))):
+        o = outcomes[sl]
+        print(
+            f"{label} {window:,}: mean reward {rewards[sl].mean():+.4f}  "
+            f"win {np.mean(o > 0):.3f}  loss {np.mean(o < 0):.3f}  draw {np.mean(o == 0):.3f}  "
+            f"mean steps {lengths[sl].mean():.3f}"
+        )
     print(f"Q[(15, 10, 0)] = stick {agent.q[15, 10, 0, STICK]:+.4f}, hit {agent.q[15, 10, 0, HIT]:+.4f}")
+
+    policy = agent.policy_table()
+    print("\nGreedy policy, no usable ace (rows: player sum, cols: dealer card)")
+    print(format_policy(policy, usable_ace=0))
+    print("\nGreedy policy, usable ace")
+    print(format_policy(policy, usable_ace=1))
 
     if args.save:
         np.save(args.save, agent.q)
-        print(f"saved Q-table to {args.save}")
+        print(f"\nsaved Q-table to {args.save}")
+
+    if args.plot_dir:
+        from plot_training import plot_training  # matplotlib is only needed for plots
+
+        for path in plot_training(log, args.plot_dir, window=args.window):
+            print(f"saved plot: {path}")
 
 
 if __name__ == "__main__":
